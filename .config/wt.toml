@@ -1,0 +1,15 @@
+[post-create]
+ctw-context = """
+  # Linear-style: ENG-123
+  TICKET=$(echo '{{ branch }}' | grep -oE '[A-Z]+-[0-9]+' | head -1)
+
+  # GitHub-style: owner-repo-42 (requires CTW_GITHUB_REPO or --tracker profile)
+  if [ -z "$TICKET" ] && [ -n "$CTW_GITHUB_REPO" ]; then
+    NUMBER=$(echo '{{ branch }}' | grep -oE '[0-9]+' | tail -1)
+    [ -n "$NUMBER" ] && TICKET="${CTW_GITHUB_REPO}#${NUMBER}"
+  fi
+
+  if [ -n "$TICKET" ] && command -v ctw &>/dev/null; then
+    ctw context "$TICKET" -o TASK.md && echo "Loaded $TICKET → TASK.md"
+  fi
+"""
