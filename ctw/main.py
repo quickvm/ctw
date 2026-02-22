@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Annotated
@@ -196,6 +197,74 @@ def _apply_worktree_path(user_config_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Spawn helpers
+# ---------------------------------------------------------------------------
+
+
+def _sandbox_available() -> bool:
+    """Return True if bubblewrap (bwrap) is present for OS-level sandbox containment."""
+    return shutil.which("bwrap") is not None
+
+
+def _resolve_worktree_path(branch: str) -> Path:
+    """Return the absolute path to the worktree for branch, creating it if absent.
+
+    Checks git worktree list first; creates at .worktrees/<branch> relative to repo
+    root if not found.
+    """
+    list_result = subprocess.run(["git", "worktree", "list", "--porcelain"], capture_output=True, text=True)
+    if list_result.returncode == 0:
+        for chunk in list_result.stdout.strip().split("\n\n"):
+            if not chunk.strip():
+                continue
+            fields: dict[str, str] = {}
+            for line in chunk.splitlines():
+                if " " in line:
+                    k, _, v = line.partition(" ")
+                    fields[k] = v
+            if fields.get("branch") in (f"refs/heads/{branch}", branch):
+                return Path(fields["worktree"])
+
+    # Worktree not found — create it at the conventional path.
+    root_result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if root_result.returncode != 0:
+        typer.echo("error: not inside a git repository", err=True)
+        raise typer.Exit(1)
+
+    worktree_path = Path(root_result.stdout.strip()) / ".worktrees" / branch
+    branch_check = subprocess.run(["git", "branch", "--list", branch], capture_output=True, text=True)
+    if branch in branch_check.stdout:
+        create_result = subprocess.run(
+            ["git", "worktree", "add", str(worktree_path), branch], capture_output=True, text=True
+        )
+    else:
+        create_result = subprocess.run(
+            ["git", "worktree", "add", "-b", branch, str(worktree_path)], capture_output=True, text=True
+        )
+
+    if create_result.returncode != 0:
+        typer.echo(f"error: failed to create worktree: {create_result.stderr.strip()}", err=True)
+        raise typer.Exit(1)
+
+    return worktree_path
+
+
+def _build_agent_prompt(issue: Issue) -> str:
+    """Return the default agent prompt for implementing a ticket."""
+    return (
+        f"You are implementing ticket {issue.identifier}: {issue.title}\n\n"
+        "Read TASK.md for full context. Then:\n"
+        "1. Explore the codebase to understand relevant code\n"
+        "2. Implement the changes described\n"
+        "3. Run tests (check CLAUDE.md for the test command)\n"
+        "4. Commit your changes with a clear commit message\n\n"
+        "Stop when: all tests pass AND all changes are committed to this branch.\n"
+        "Do not open a PR. Do not ask for clarification — make your best judgment.\n"
+        "If you make assumptions, append a brief '## Agent Notes' section to TASK.md."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -340,6 +409,46 @@ def slug_cmd(
     issue = provider.get_issue(issue_id)
     # No trailing newline — designed for shell substitution: $(ctw slug ENG-123)
     typer.echo(make_slug(issue), nl=False)
+
+
+@app.command("spawn")
+def spawn(
+    ticket_id: Annotated[str, typer.Argument(help="Ticket ID (e.g. ENG-123 or owner/repo#42)")],
+    tracker: TrackerOpt = None,
+    background: Annotated[
+        bool, typer.Option("--background", "-b", help="Run agent in background, output to agent.log")
+    ] = False,
+    force_unsandboxed: Annotated[
+        bool, typer.Option("--force-unsandboxed", help="Skip sandbox availability check")
+    ] = False,
+    prompt_override: Annotated[str | None, typer.Option("--prompt", help="Override the default agent prompt")] = None,
+) -> None:
+    """Spawn a Claude subagent to implement a ticket in its worktree."""
+    if not _sandbox_available() and not force_unsandboxed:
+        typer.echo(
+            "error: Claude sandbox not detected on this system. Running with\n"
+            "--dangerously-skip-permissions without a sandbox grants the agent\n"
+            "unrestricted filesystem access. Pass --force-unsandboxed to proceed anyway.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    provider = get_provider(tracker)
+    issue = provider.get_issue(ticket_id)
+    branch = make_slug(issue)
+    worktree_path = _resolve_worktree_path(branch)
+
+    (worktree_path / "TASK.md").write_text(render_context(issue))
+
+    prompt = prompt_override if prompt_override else _build_agent_prompt(issue)
+    cmd = ["claude", "--dangerously-skip-permissions", "--max-turns", "50", "-p", prompt]
+
+    if background:
+        log_path = worktree_path / "agent.log"
+        proc = subprocess.Popen(cmd, cwd=worktree_path, stdout=log_path.open("w"), stderr=subprocess.STDOUT)
+        typer.echo(f"Agent spawned (PID {proc.pid}). Logs: {log_path}")
+    else:
+        subprocess.run(cmd, cwd=worktree_path, check=False)
 
 
 @app.command("set-default")

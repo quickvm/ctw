@@ -25,13 +25,23 @@ Load a ticket into an isolated worktree and start working on it immediately.
    - If exists: `wt switch <branch-name>`
    - If not: `wt switch --create <branch-name> --yes`
 
-4. Read `TASK.md` fully.
+4. Ask exactly this one question (no other text before or after):
+   ```
+   Worktree ready at <path>. Work here now [w] or spawn a background agent [s]?
+   ```
+   Wait for the user's response.
 
-5. Run `git log --oneline -5` and `git status`
+   - If `w`: continue to step 5 and begin work immediately (existing behavior).
+   - If `s`: run `ctw spawn <TICKET_ID> [--tracker <profile>]`, print
+     "Agent spawned. Check progress with: tail -f <worktree-path>/agent.log" and stop.
 
-6. If commits exist beyond main: run `git diff main...HEAD`
+5. Read `TASK.md` fully.
 
-7. Output this exact briefing:
+6. Run `git log --oneline -5` and `git status`
+
+7. If commits exist beyond main: run `git diff main...HEAD`
+
+8. Output this exact briefing:
    ```
    ## <identifier>: <title>
 
@@ -44,7 +54,7 @@ Load a ticket into an isolated worktree and start working on it immediately.
    Starting with: <one sentence describing your first action>
    ```
 
-8. **Begin work immediately** after the briefing. No confirmation prompt. Never say "shall I
+9. **Begin work immediately** after the briefing. No confirmation prompt. Never say "shall I
    proceed" or "let me know if you want me to start."
 
 ## Hard constraints
@@ -52,3 +62,4 @@ Load a ticket into an isolated worktree and start working on it immediately.
 - **Never** ask clarifying questions before starting — TASK.md is the source of truth.
 - If `ctw` or `wt` is not on PATH: fail immediately naming what is missing and where to get it.
 - The briefing is for situational awareness only — do not wait for the user to confirm direction.
+- If `ctw spawn` is not found, print: "error: ctw not on PATH. Run: uv tool install -e ." and stop.

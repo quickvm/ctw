@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from typer.testing import CliRunner
 
@@ -423,6 +424,198 @@ class TestWtHelpers:
             runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
 
         assert 'worktree-path = "custom/path"' in user_config.read_text()
+
+
+class TestSpawn:
+    def test_sandbox_missing_blocks_spawn(self) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=False):
+                result = runner.invoke(app, ["spawn", "ENG-1"])
+        assert result.exit_code == 1
+        assert "force-unsandboxed" in result.output
+
+    def test_force_unsandboxed_bypasses_sandbox_check(self, tmp_path: Path) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=False):
+                with patch("ctw.main._resolve_worktree_path", return_value=tmp_path):
+                    with patch("subprocess.run") as mock_run:
+                        result = runner.invoke(app, ["spawn", "ENG-1", "--force-unsandboxed"])
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
+
+    def test_blocking_spawn_invokes_claude(self, tmp_path: Path) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=True):
+                with patch("ctw.main._resolve_worktree_path", return_value=tmp_path):
+                    with patch("subprocess.run") as mock_run:
+                        result = runner.invoke(app, ["spawn", "ENG-1"])
+        assert result.exit_code == 0
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "claude"
+        assert "--dangerously-skip-permissions" in cmd
+        assert "--max-turns" in cmd
+        assert "-p" in cmd
+        assert mock_run.call_args[1]["cwd"] == tmp_path
+
+    def test_background_spawn_prints_pid_and_log_path(self, tmp_path: Path) -> None:
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=True):
+                with patch("ctw.main._resolve_worktree_path", return_value=tmp_path):
+                    with patch("subprocess.Popen", return_value=mock_proc):
+                        result = runner.invoke(app, ["spawn", "ENG-1", "--background"])
+        assert result.exit_code == 0
+        assert "12345" in result.output
+        assert "agent.log" in result.output
+
+    def test_writes_task_md_to_worktree(self, tmp_path: Path) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=True):
+                with patch("ctw.main._resolve_worktree_path", return_value=tmp_path):
+                    with patch("subprocess.run"):
+                        runner.invoke(app, ["spawn", "ENG-1"])
+        task_md = tmp_path / "TASK.md"
+        assert task_md.exists()
+        assert "ENG-1" in task_md.read_text()
+
+    def test_prompt_override_passed_to_claude(self, tmp_path: Path) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=True):
+                with patch("ctw.main._resolve_worktree_path", return_value=tmp_path):
+                    with patch("subprocess.run") as mock_run:
+                        runner.invoke(app, ["spawn", "ENG-1", "--prompt", "Fix only the login bug"])
+        cmd = mock_run.call_args[0][0]
+        assert "Fix only the login bug" in cmd
+
+    def test_default_prompt_contains_ticket_identifier(self, tmp_path: Path) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main._sandbox_available", return_value=True):
+                with patch("ctw.main._resolve_worktree_path", return_value=tmp_path):
+                    with patch("subprocess.run") as mock_run:
+                        runner.invoke(app, ["spawn", "ENG-1"])
+        cmd = mock_run.call_args[0][0]
+        prompt_text = cmd[cmd.index("-p") + 1]
+        assert "ENG-1" in prompt_text
+
+
+class TestResolveWorktreePath:
+    def test_returns_existing_worktree_path(self) -> None:
+        from ctw.main import _resolve_worktree_path
+
+        porcelain = (
+            "worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n\n"
+            "worktree /home/user/project/.worktrees/eng-1-test-issue\n"
+            "HEAD def456\nbranch refs/heads/eng-1-test-issue\n"
+        )
+
+        def fake_run(args, **kwargs):
+            m = MagicMock(returncode=0, stdout=porcelain if args[:3] == ["git", "worktree", "list"] else "")
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = _resolve_worktree_path("eng-1-test-issue")
+        assert result == Path("/home/user/project/.worktrees/eng-1-test-issue")
+
+    def test_creates_worktree_for_new_branch(self, tmp_path: Path) -> None:
+        from ctw.main import _resolve_worktree_path
+
+        main_only_porcelain = "worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n"
+        calls: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            calls.append(list(args))
+            m = MagicMock(returncode=0)
+            if args[:3] == ["git", "worktree", "list"]:
+                m.stdout = main_only_porcelain
+            elif args[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                m.stdout = str(tmp_path)
+            elif args[:2] == ["git", "branch"]:
+                m.stdout = ""  # branch doesn't exist yet
+            else:
+                m.stdout = ""
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = _resolve_worktree_path("new-feature")
+
+        assert result == tmp_path / ".worktrees" / "new-feature"
+        worktree_add = next(c for c in calls if len(c) > 2 and c[:3] == ["git", "worktree", "add"])
+        assert "-b" in worktree_add
+
+    def test_uses_existing_branch_without_b_flag(self, tmp_path: Path) -> None:
+        from ctw.main import _resolve_worktree_path
+
+        main_only_porcelain = "worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n"
+        calls: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            calls.append(list(args))
+            m = MagicMock(returncode=0)
+            if args[:3] == ["git", "worktree", "list"]:
+                m.stdout = main_only_porcelain
+            elif args[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                m.stdout = str(tmp_path)
+            elif args[:2] == ["git", "branch"]:
+                m.stdout = "  existing-branch\n"
+            else:
+                m.stdout = ""
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = _resolve_worktree_path("existing-branch")
+
+        assert result == tmp_path / ".worktrees" / "existing-branch"
+        worktree_add = next(c for c in calls if len(c) > 2 and c[:3] == ["git", "worktree", "add"])
+        assert "-b" not in worktree_add
+
+    def test_exits_when_not_in_git_repo(self) -> None:
+        from ctw.main import _resolve_worktree_path
+
+        def fake_run(args, **kwargs):
+            m = MagicMock()
+            if args[:3] == ["git", "worktree", "list"]:
+                m.returncode = 128
+                m.stdout = ""
+            elif args[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                m.returncode = 128
+                m.stdout = ""
+            else:
+                m.returncode = 0
+                m.stdout = ""
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with pytest.raises(click.exceptions.Exit):
+                _resolve_worktree_path("some-branch")
+
+    def test_exits_when_worktree_add_fails(self, tmp_path: Path) -> None:
+        from ctw.main import _resolve_worktree_path
+
+        main_only_porcelain = "worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n"
+
+        def fake_run(args, **kwargs):
+            m = MagicMock()
+            if args[:3] == ["git", "worktree", "list"]:
+                m.returncode = 0
+                m.stdout = main_only_porcelain
+            elif args[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                m.returncode = 0
+                m.stdout = str(tmp_path)
+            elif args[:2] == ["git", "branch"]:
+                m.returncode = 0
+                m.stdout = ""
+            elif args[:3] == ["git", "worktree", "add"]:
+                m.returncode = 1
+                m.stderr = "fatal: already exists"
+            else:
+                m.returncode = 0
+                m.stdout = ""
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with pytest.raises(click.exceptions.Exit):
+                _resolve_worktree_path("bad-branch")
 
 
 class TestInstallCommands:
