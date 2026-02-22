@@ -246,6 +246,57 @@ class TestConfigureWt:
         hook = wt_config.read_text()
         assert 'ctw context "$TICKET"' in hook and "--tracker" not in hook.split("ctw context")[1].split("\n")[0]
 
+    def test_auto_approves_hook_when_wt_available(self, tmp_path: Path) -> None:
+        wt_config = tmp_path / ".config" / "wt.toml"
+
+        def fake_run(args, **kwargs):
+            m = MagicMock(returncode=0)
+            m.stdout = "  main\n"
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run) as mock_run:
+            result = runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
+
+        assert result.exit_code == 0, result.output
+        called = [c.args[0] for c in mock_run.call_args_list]
+        assert ["wt", "hook", "approvals", "add", "ctw-context"] in called
+        assert "auto-approved" in result.output
+
+    def test_warns_when_approval_fails(self, tmp_path: Path) -> None:
+        wt_config = tmp_path / ".config" / "wt.toml"
+
+        def fake_run(args, **kwargs):
+            m = MagicMock()
+            m.stdout = "  main\n"
+            m.returncode = 1 if args == ["wt", "hook", "approvals", "add", "ctw-context"] else 0
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
+
+        assert result.exit_code == 0, result.output
+        assert "Could not auto-approve" in result.output
+
+    def test_warns_when_main_branch_missing(self, tmp_path: Path) -> None:
+        wt_config = tmp_path / ".config" / "wt.toml"
+
+        def fake_run(args, **kwargs):
+            m = MagicMock(returncode=0)
+            if args[:3] == ["git", "branch", "--list"]:
+                m.stdout = ""
+            elif args[:2] == ["git", "symbolic-ref"]:
+                m.stdout = "master"
+            else:
+                m.stdout = ""
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
+
+        assert result.exit_code == 0, result.output
+        assert "master" in result.output
+        assert "default-branch" in result.output
+
 
 class TestInstallCommands:
     def test_creates_symlinks(self, tmp_path: Path) -> None:

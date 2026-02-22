@@ -384,7 +384,8 @@ def configure_wt(
     target = config
 
     # Warn if wt is not on PATH (non-fatal — file may be committed for others)
-    if subprocess.run(["which", "wt"], capture_output=True).returncode != 0:
+    wt_found = subprocess.run(["which", "wt"], capture_output=True).returncode == 0
+    if not wt_found:
         rprint("[yellow]Warning:[/yellow] wt not found on PATH. Install worktrunk before using this hook.")
 
     if target.exists():
@@ -410,6 +411,23 @@ def configure_wt(
 
     action = "Updated" if (post_create is not None and force) else "Wrote"
     rprint(f"[green]✓[/green] {action} {target}")
+
+    if wt_found:
+        approval = subprocess.run(["wt", "hook", "approvals", "add", "ctw-context"], capture_output=True)
+        if approval.returncode == 0:
+            rprint("[green]✓[/green] Hook auto-approved (wt hook approvals add ctw-context)")
+        else:
+            rprint("[yellow]Warning:[/yellow] Could not auto-approve hook. Run manually:")
+            rprint("  wt hook approvals add ctw-context")
+
+    main_check = subprocess.run(["git", "branch", "--list", "main"], capture_output=True, text=True)
+    if not main_check.stdout.strip():
+        branch_result = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], capture_output=True, text=True)
+        current = branch_result.stdout.strip()
+        if current:
+            rprint("[yellow]Tip:[/yellow] Branch 'main' not found locally. If wt complains, run:")
+            rprint(f"  wt config state default-branch set {current}")
+
     rprint("")
     rprint(f"[dim]Commit it:[/dim] git add {target} && git commit -m 'Add CTW worktree hook'")
 

@@ -3,10 +3,10 @@ Load a ticket into an isolated worktree and start working on it immediately.
 ## Usage
 
 ```
-/pull-issue ENG-456
-/pull-issue jdoss/quickvm#42
-/pull-issue ENG-456 --tracker work
-/pull-issue ENG-456 --no-worktree
+/pull-ticket ENG-456
+/pull-ticket jdoss/quickvm#42
+/pull-ticket ENG-456 --tracker work
+/pull-ticket ENG-456 --no-worktree
 ```
 
 ## Behavior
@@ -14,7 +14,7 @@ Load a ticket into an isolated worktree and start working on it immediately.
 1. Parse `--tracker <profile>` and `--no-worktree` flags first, then the ticket ID.
    - If no ticket ID: print error and stop:
      ```
-     Error: Usage: /pull-issue ENG-456 [--tracker <profile>] [--no-worktree]
+     Error: Usage: /pull-ticket ENG-456 [--tracker <profile>] [--no-worktree]
      ```
 
 2. Run `ctw context <TICKET_ID> [--tracker <profile>] -o TASK.md`
@@ -23,7 +23,7 @@ Load a ticket into an isolated worktree and start working on it immediately.
    - Run `ctw slug <TICKET_ID> [--tracker <profile>]` to get branch name
    - Run `wt list | grep <branch-name>` to check existence
    - If exists: `wt switch <branch-name>`
-   - If not: `wt switch --create <branch-name>`
+   - If not: `wt switch --create <branch-name> --yes`
 
 4. Read `TASK.md` fully.
 

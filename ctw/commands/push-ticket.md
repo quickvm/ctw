@@ -3,10 +3,10 @@ Capture the current tangential issue as a ticket without switching context.
 ## Usage
 
 ```
-/push-issue
-/push-issue the logout button throws 500 when session is expired
-/push-issue --tracker personal
-/push-issue the logout bug --tracker quickvm
+/push-ticket
+/push-ticket the logout button throws 500 when session is expired
+/push-ticket --tracker personal
+/push-ticket the logout bug --tracker quickvm
 ```
 
 ## Behavior
@@ -31,7 +31,7 @@ Capture the current tangential issue as a ticket without switching context.
    ```
 
 6. After ticket is created, ask **one yes/no**: "Create a background worktree now? [y/N]"
-   - If yes: run `ctw slug <TICKET_ID> [--tracker <profile>]` → `wt switch --create <branch-name>`
+   - If yes: run `ctw slug <TICKET_ID> [--tracker <profile>]` → `wt switch --create <branch-name> --yes`
    - Do **NOT** switch into the new worktree.
 
 7. Output exactly one summary line then stop:
