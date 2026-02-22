@@ -16,7 +16,7 @@ from ctw.providers.github import GitHubProvider
 from ctw.providers.linear import LinearProvider
 from ctw.settings import CONFIG_PATH, CtwSettings, _list_profiles, get_settings
 
-app = typer.Typer(help="claude-ticket-wrangler: Linear + GitHub Issues + wt integration")
+app = typer.Typer(help="claude-ticket-wrangler: Linear + GitHub Issues + wt integration", no_args_is_help=True)
 
 TrackerOpt = Annotated[
     str | None,

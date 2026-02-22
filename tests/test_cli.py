@@ -67,6 +67,14 @@ def _mock_provider(issue: Issue | None = None) -> MagicMock:
     return provider
 
 
+class TestNoArgs:
+    def test_shows_help_not_error(self) -> None:
+        result = runner.invoke(app, [])
+        # no_args_is_help=True: CliRunner exits 2 (known Typer quirk) but shows help
+        assert "Missing command" not in result.output
+        assert "Commands" in result.output
+
+
 class TestListIssues:
     def test_renders_table(self) -> None:
         with patch("ctw.main.get_provider", return_value=_mock_provider()):
