@@ -306,6 +306,125 @@ class TestConfigureWt:
         assert "default-branch" in result.output
 
 
+class TestWtHelpers:
+    def test_parse_remote_identifier_https(self) -> None:
+        from ctw.main import _parse_remote_identifier
+
+        assert _parse_remote_identifier("https://github.com/quickvm/ctw.git") == "github.com/quickvm/ctw"
+
+    def test_parse_remote_identifier_ssh(self) -> None:
+        from ctw.main import _parse_remote_identifier
+
+        assert _parse_remote_identifier("git@github.com:quickvm/ctw.git") == "github.com/quickvm/ctw"
+
+    def test_parse_remote_identifier_no_git_suffix(self) -> None:
+        from ctw.main import _parse_remote_identifier
+
+        assert _parse_remote_identifier("https://github.com/quickvm/ctw") == "github.com/quickvm/ctw"
+
+    def test_parse_remote_identifier_unknown_scheme_returns_none(self) -> None:
+        from ctw.main import _parse_remote_identifier
+
+        assert _parse_remote_identifier("ftp://example.com/repo.git") is None
+
+    def test_set_worktree_path_creates_new_config(self, tmp_path: Path) -> None:
+        import tomlkit
+
+        from ctw.main import _set_worktree_path
+
+        user_config = tmp_path / "worktrunk" / "config.toml"
+        result = _set_worktree_path("github.com/quickvm/ctw", user_config)
+
+        assert result is True
+        assert user_config.exists()
+        doc = tomlkit.load(user_config.open())
+        assert doc["projects"]["github.com/quickvm/ctw"]["worktree-path"] == ".worktrees/{{ branch | sanitize }}"
+
+    def test_set_worktree_path_merges_into_existing_config(self, tmp_path: Path) -> None:
+        from ctw.main import _set_worktree_path
+
+        user_config = tmp_path / "worktrunk" / "config.toml"
+        user_config.parent.mkdir(parents=True)
+        user_config.write_text("# existing config\n")
+
+        _set_worktree_path("github.com/quickvm/ctw", user_config)
+        content = user_config.read_text()
+        assert "# existing config" in content
+        assert "worktree-path" in content
+
+    def test_set_worktree_path_skips_if_already_set(self, tmp_path: Path) -> None:
+        from ctw.main import _set_worktree_path
+
+        user_config = tmp_path / "worktrunk" / "config.toml"
+        user_config.parent.mkdir(parents=True)
+        user_config.write_text('[projects."github.com/quickvm/ctw"]\nworktree-path = "custom/path"\n')
+
+        result = _set_worktree_path("github.com/quickvm/ctw", user_config)
+        assert result is False
+        assert 'worktree-path = "custom/path"' in user_config.read_text()
+
+    def test_configure_wt_sets_worktree_path(self, tmp_path: Path, monkeypatch) -> None:
+        import tomlkit
+
+        import ctw.main as ctw_main
+
+        wt_config = tmp_path / ".config" / "wt.toml"
+        user_config = tmp_path / "worktrunk" / "config.toml"
+        monkeypatch.setattr(ctw_main, "_wt_user_config_path", lambda: user_config)
+
+        def fake_run(args, **kwargs):
+            m = MagicMock(returncode=0)
+            m.stdout = "https://github.com/quickvm/ctw.git" if args[:3] == ["git", "remote", "get-url"] else "  main\n"
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
+
+        assert result.exit_code == 0, result.output
+        assert user_config.exists()
+        doc = tomlkit.load(user_config.open())
+        assert doc["projects"]["github.com/quickvm/ctw"]["worktree-path"] == ".worktrees/{{ branch | sanitize }}"
+        assert "worktrees will be created" in result.output.lower()
+
+    def test_configure_wt_skips_worktree_path_when_no_remote(self, tmp_path: Path, monkeypatch) -> None:
+        import ctw.main as ctw_main
+
+        wt_config = tmp_path / ".config" / "wt.toml"
+        user_config = tmp_path / "worktrunk" / "config.toml"
+        monkeypatch.setattr(ctw_main, "_wt_user_config_path", lambda: user_config)
+
+        def fake_run(args, **kwargs):
+            m = MagicMock()
+            m.stdout = ""
+            m.returncode = 1 if args[:3] == ["git", "remote", "get-url"] else 0
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
+
+        assert result.exit_code == 0, result.output
+        assert not user_config.exists()
+
+    def test_configure_wt_no_overwrite_existing_worktree_path(self, tmp_path: Path, monkeypatch) -> None:
+        import ctw.main as ctw_main
+
+        wt_config = tmp_path / ".config" / "wt.toml"
+        user_config = tmp_path / "worktrunk" / "config.toml"
+        user_config.parent.mkdir(parents=True)
+        user_config.write_text('[projects."github.com/quickvm/ctw"]\nworktree-path = "custom/path"\n')
+        monkeypatch.setattr(ctw_main, "_wt_user_config_path", lambda: user_config)
+
+        def fake_run(args, **kwargs):
+            m = MagicMock(returncode=0)
+            m.stdout = "https://github.com/quickvm/ctw.git" if args[:3] == ["git", "remote", "get-url"] else "  main\n"
+            return m
+
+        with patch("subprocess.run", side_effect=fake_run):
+            runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
+
+        assert 'worktree-path = "custom/path"' in user_config.read_text()
+
+
 class TestInstallCommands:
     def test_creates_symlinks(self, tmp_path: Path) -> None:
         dest_dir = tmp_path / ".claude" / "commands"

@@ -1,5 +1,6 @@
 """CTW CLI — all commands."""
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -136,6 +137,62 @@ def _wt_hook_value(tracker: str | None) -> tomlkit.items.Item:
     # Parse a minimal TOML fragment to get a properly typed multiline string item
     fragment = tomlkit.parse(f'x = """\n{content}\n"""')
     return fragment["x"]  # type: ignore[return-value]
+
+
+def _parse_remote_identifier(url: str) -> str | None:
+    """Parse a git remote URL to a worktrunk project identifier like 'github.com/user/repo'."""
+    cleaned = url.strip().removesuffix(".git")
+    if cleaned.startswith("git@"):
+        return cleaned[4:].replace(":", "/", 1)
+    for prefix in ("https://", "http://"):
+        if cleaned.startswith(prefix):
+            return cleaned[len(prefix) :]
+    return None
+
+
+def _wt_user_config_path() -> Path:
+    """Return the worktrunk user config path, respecting XDG_CONFIG_HOME."""
+    xdg = os.environ.get("XDG_CONFIG_HOME", "")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
+    return base / "worktrunk" / "config.toml"
+
+
+def _set_worktree_path(identifier: str, user_config: Path) -> bool:
+    """Write worktree-path under [projects."<identifier>"] in the worktrunk user config.
+
+    Returns True if written, False if already configured (no-op).
+    """
+    doc = tomlkit.load(user_config.open()) if user_config.exists() else tomlkit.document()
+
+    if "projects" in doc and identifier in doc["projects"]:
+        if "worktree-path" in doc["projects"][identifier]:
+            return False
+
+    if "projects" not in doc:
+        doc.add("projects", tomlkit.table(is_super_table=True))
+    if identifier not in doc["projects"]:
+        doc["projects"].add(identifier, tomlkit.table())
+
+    doc["projects"][identifier]["worktree-path"] = ".worktrees/{{ branch | sanitize }}"
+    user_config.parent.mkdir(parents=True, exist_ok=True)
+    user_config.write_text(tomlkit.dumps(doc))
+    return True
+
+
+def _apply_worktree_path(user_config_path: Path) -> None:
+    """Detect git remote and configure worktree-path in the worktrunk user config."""
+    remote_result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True)
+    if remote_result.returncode != 0 or not isinstance(remote_result.stdout, str):
+        return
+    identifier = _parse_remote_identifier(remote_result.stdout)
+    if not identifier:
+        return
+    try:
+        if _set_worktree_path(identifier, user_config_path):
+            rprint(f"[green]✓[/green] Set worktree-path in {user_config_path}")
+            rprint("  Worktrees will be created at .worktrees/<branch> instead of alongside the repo")
+    except OSError as exc:
+        rprint(f"[yellow]Warning:[/yellow] Could not update worktrunk user config: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +468,8 @@ def configure_wt(
 
     action = "Updated" if (post_create is not None and force) else "Wrote"
     rprint(f"[green]✓[/green] {action} {target}")
+
+    _apply_worktree_path(_wt_user_config_path())
 
     if wt_found:
         approval = subprocess.run(["wt", "hook", "approvals", "add", "ctw-context"], capture_output=True)
