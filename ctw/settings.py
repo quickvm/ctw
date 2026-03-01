@@ -17,6 +17,7 @@ class CtwSettings(BaseSettings):
         env_prefix="CTW_",
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     # Tracker selection
