@@ -15,7 +15,7 @@ from rich.table import Table
 
 from ctw.models import Issue, IssueContext
 from ctw.providers.base import TicketProvider
-from ctw.providers.github import GitHubProvider
+from ctw.providers.github import GitHubProvider, _repo_from_git_remote
 from ctw.providers.linear import LinearProvider
 from ctw.settings import CONFIG_PATH, CtwSettings, _list_profiles, _load_toml, get_settings
 
@@ -104,9 +104,14 @@ def make_slug(issue: Issue) -> str:
     """Return a git-safe branch name for the issue.
 
     Linear:  ENG-123 → eng-123-fix-null-check-in-auth-middleware
-    GitHub:  jdoss/quickvm#42 → jdoss-quickvm-42-fix-null-check
+    GitHub (other repo):   jdoss/quickvm#42 → jdoss-quickvm-42-fix-null-check
+    GitHub (current repo): jdoss/quickvm#42 → 42-fix-null-check
     """
     identifier_slug = _slugify(issue.identifier)
+    if issue.provider == "github" and issue.team is not None:
+        if _repo_from_git_remote() == issue.team:
+            _, num_str = issue.identifier.rsplit("#", 1)
+            identifier_slug = num_str
     title_slug = _slugify(issue.title, max_len=40)
     return f"{identifier_slug}-{title_slug}"
 

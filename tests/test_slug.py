@@ -1,5 +1,7 @@
 """Tests for make_slug."""
 
+from unittest.mock import MagicMock, patch
+
 from ctw.main import make_slug
 from ctw.models import Issue
 
@@ -51,6 +53,19 @@ class TestLinearSlug:
         assert slug.startswith("eng-1")
 
 
+def _gh_issue(identifier: str, title: str, team: str | None = None) -> Issue:
+    return Issue(
+        id="1",
+        identifier=identifier,
+        title=title,
+        description=None,
+        url="https://github.com/example",
+        state="Open",
+        provider="github",
+        team=team,
+    )
+
+
 class TestGitHubSlug:
     def test_basic(self) -> None:
         issue = _issue("jdoss/quickvm#42", "Fix null check", provider="github")
@@ -73,3 +88,21 @@ class TestGitHubSlug:
         prefix = "owner-repo-1-"
         title_part = slug[len(prefix) :]
         assert len(title_part) <= 40
+
+    def test_trims_to_number_for_current_repo(self) -> None:
+        issue = _gh_issue("jdoss/quickvm#42", "Fix null check", team="jdoss/quickvm")
+        remote = MagicMock(returncode=0, stdout="https://github.com/jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=remote):
+            assert make_slug(issue) == "42-fix-null-check"
+
+    def test_keeps_full_slug_for_different_repo(self) -> None:
+        issue = _gh_issue("other/repo#42", "Fix null check", team="other/repo")
+        remote = MagicMock(returncode=0, stdout="https://github.com/jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=remote):
+            assert make_slug(issue) == "other-repo-42-fix-null-check"
+
+    def test_keeps_full_slug_when_no_git_remote(self) -> None:
+        issue = _gh_issue("jdoss/quickvm#42", "Fix null check", team="jdoss/quickvm")
+        no_remote = MagicMock(returncode=128, stdout="")
+        with patch("subprocess.run", return_value=no_remote):
+            assert make_slug(issue) == "jdoss-quickvm-42-fix-null-check"
