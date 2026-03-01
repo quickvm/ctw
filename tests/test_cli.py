@@ -618,6 +618,61 @@ class TestResolveWorktreePath:
                 _resolve_worktree_path("bad-branch")
 
 
+class TestInferProviderType:
+    def test_linear_identifier(self) -> None:
+        from ctw.main import _infer_provider_type
+
+        assert _infer_provider_type("ENG-123") == "linear"
+        assert _infer_provider_type("INF-1") == "linear"
+
+    def test_bare_number(self) -> None:
+        from ctw.main import _infer_provider_type
+
+        assert _infer_provider_type("49") == "github"
+
+    def test_qualified_github(self) -> None:
+        from ctw.main import _infer_provider_type
+
+        assert _infer_provider_type("jdoss/quickvm#42") == "github"
+
+    def test_ambiguous_returns_none(self) -> None:
+        from ctw.main import _infer_provider_type
+
+        assert _infer_provider_type("something-else") is None
+
+
+class TestFindProfileForProvider:
+    def test_finds_linear_profile(self) -> None:
+        from ctw.main import _find_profile_for_provider
+
+        config = {"work": {"provider": "linear", "linear_api_key": "lin_test"}}
+        assert _find_profile_for_provider(config, "linear") == "work"
+
+    def test_finds_github_profile(self) -> None:
+        from ctw.main import _find_profile_for_provider
+
+        config = {"personal": {"provider": "github", "github_token": "ghp_test"}}
+        assert _find_profile_for_provider(config, "github") == "personal"
+
+    def test_defaults_to_linear_when_no_provider_key(self) -> None:
+        from ctw.main import _find_profile_for_provider
+
+        config = {"work": {"linear_api_key": "lin_test"}}
+        assert _find_profile_for_provider(config, "linear") == "work"
+
+    def test_returns_none_when_no_match(self) -> None:
+        from ctw.main import _find_profile_for_provider
+
+        config = {"work": {"provider": "linear"}}
+        assert _find_profile_for_provider(config, "github") is None
+
+    def test_skips_non_mapping_entries(self) -> None:
+        from ctw.main import _find_profile_for_provider
+
+        config = {"default_tracker": "work", "work": {"provider": "linear"}}
+        assert _find_profile_for_provider(config, "linear") == "work"
+
+
 class TestInstallCommands:
     def test_creates_symlinks(self, tmp_path: Path) -> None:
         dest_dir = tmp_path / ".claude" / "commands"

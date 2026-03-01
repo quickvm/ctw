@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated
 
@@ -16,7 +17,7 @@ from ctw.models import Issue, IssueContext
 from ctw.providers.base import TicketProvider
 from ctw.providers.github import GitHubProvider
 from ctw.providers.linear import LinearProvider
-from ctw.settings import CONFIG_PATH, CtwSettings, _list_profiles, get_settings
+from ctw.settings import CONFIG_PATH, CtwSettings, _list_profiles, _load_toml, get_settings
 
 app = typer.Typer(help="claude-ticket-wrangler: Linear + GitHub Issues + wt integration", no_args_is_help=True)
 
@@ -47,8 +48,35 @@ _WT_HOOK_TEMPLATE = """\
 # Provider factory
 # ---------------------------------------------------------------------------
 
+_LINEAR_ID_RE = re.compile(r"^[A-Z]+-\d+$")
 
-def get_provider(tracker: str | None = None) -> TicketProvider:
+
+def _infer_provider_type(issue_id: str) -> str | None:
+    """Return 'linear' or 'github' based on issue ID format, or None if ambiguous."""
+    if _LINEAR_ID_RE.match(issue_id):
+        return "linear"
+    if issue_id.isdigit() or "#" in issue_id:
+        return "github"
+    return None
+
+
+def _find_profile_for_provider(config: Mapping, provider_type: str) -> str | None:
+    """Return the first profile name in config matching the given provider type."""
+    for name, val in config.items():
+        if not isinstance(val, Mapping):
+            continue
+        if val.get("provider", "linear") == provider_type:
+            return name
+    return None
+
+
+def get_provider(tracker: str | None = None, issue_id: str | None = None) -> TicketProvider:
+    if tracker is None and issue_id is not None:
+        provider_type = _infer_provider_type(issue_id)
+        if provider_type is not None:
+            inferred = _find_profile_for_provider(_load_toml(), provider_type)
+            if inferred is not None:
+                tracker = inferred
     settings = get_settings(tracker=tracker)
     match settings.provider:
         case "linear":
@@ -295,7 +323,7 @@ def get_issue(
     tracker: TrackerOpt = None,
 ) -> None:
     """Show full details for an issue."""
-    provider = get_provider(tracker)
+    provider = get_provider(tracker, issue_id=issue_id)
     issue = provider.get_issue(issue_id)
 
     table = Table(title=f"{issue.identifier}: {issue.title}")
@@ -387,7 +415,7 @@ def context_cmd(
     ] = None,
 ) -> None:
     """Fetch issue and render TASK.md-style context."""
-    provider = get_provider(tracker)
+    provider = get_provider(tracker, issue_id=issue_id)
     issue = provider.get_issue(issue_id)
     rendered = render_context(issue)
     ctx = IssueContext(issue=issue, rendered=rendered)
@@ -405,7 +433,7 @@ def slug_cmd(
     tracker: TrackerOpt = None,
 ) -> None:
     """Print a git-safe branch name for the issue (no trailing newline)."""
-    provider = get_provider(tracker)
+    provider = get_provider(tracker, issue_id=issue_id)
     issue = provider.get_issue(issue_id)
     # No trailing newline — designed for shell substitution: $(ctw slug ENG-123)
     typer.echo(make_slug(issue), nl=False)
@@ -433,7 +461,7 @@ def spawn(
         )
         raise typer.Exit(1)
 
-    provider = get_provider(tracker)
+    provider = get_provider(tracker, issue_id=ticket_id)
     issue = provider.get_issue(ticket_id)
     branch = make_slug(issue)
     worktree_path = _resolve_worktree_path(branch)

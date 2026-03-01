@@ -6,7 +6,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from ctw.models import Issue, Team
-from ctw.providers.github import BASE_URL, GitHubProvider
+from ctw.providers.github import BASE_URL, GitHubProvider, _repo_from_git_remote
 from ctw.settings import CtwSettings
 
 
@@ -72,10 +72,43 @@ class TestParseIssueId:
         assert repo == "quickvm"
         assert num == 42
 
-    def test_bare_number_without_default_repo_raises(self) -> None:
+    def test_bare_number_without_default_repo_or_remote_raises(self) -> None:
         provider = GitHubProvider(_settings(github_repo=None))
-        with pytest.raises(RuntimeError, match="no default repo set"):
-            provider._parse_issue_id("42")
+        no_remote = MagicMock(returncode=1, stdout="")
+        with patch("subprocess.run", return_value=no_remote):
+            with pytest.raises(RuntimeError, match="no default repo"):
+                provider._parse_issue_id("42")
+
+    def test_bare_number_infers_from_git_remote(self) -> None:
+        provider = GitHubProvider(_settings(github_repo=None))
+        git_remote = MagicMock(returncode=0, stdout="https://github.com/jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=git_remote):
+            owner, repo, num = provider._parse_issue_id("42")
+        assert owner == "jdoss"
+        assert repo == "quickvm"
+        assert num == 42
+
+
+class TestRepoFromGitRemote:
+    def test_https_github_url(self) -> None:
+        m = MagicMock(returncode=0, stdout="https://github.com/jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=m):
+            assert _repo_from_git_remote() == "jdoss/quickvm"
+
+    def test_ssh_github_url(self) -> None:
+        m = MagicMock(returncode=0, stdout="git@github.com:jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=m):
+            assert _repo_from_git_remote() == "jdoss/quickvm"
+
+    def test_non_github_remote_returns_none(self) -> None:
+        m = MagicMock(returncode=0, stdout="https://gitlab.com/jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=m):
+            assert _repo_from_git_remote() is None
+
+    def test_no_remote_returns_none(self) -> None:
+        m = MagicMock(returncode=128, stdout="")
+        with patch("subprocess.run", return_value=m):
+            assert _repo_from_git_remote() is None
 
 
 class TestGetIssue:
@@ -102,6 +135,17 @@ class TestGetIssue:
         )
         provider = GitHubProvider(_settings(github_repo="jdoss/quickvm"))
         issue = provider.get_issue("42")
+        assert issue.identifier == "jdoss/quickvm#42"
+
+    def test_returns_issue_bare_number_via_git_remote(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42",
+            json=_ISSUE_NODE,
+        )
+        provider = GitHubProvider(_settings(github_repo=None))
+        git_remote = MagicMock(returncode=0, stdout="https://github.com/jdoss/quickvm.git\n")
+        with patch("subprocess.run", return_value=git_remote):
+            issue = provider.get_issue("42")
         assert issue.identifier == "jdoss/quickvm#42"
 
     def test_401_raises_with_message(self, httpx_mock: HTTPXMock) -> None:

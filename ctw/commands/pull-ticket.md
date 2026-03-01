@@ -3,11 +3,18 @@ Load a ticket into an isolated worktree and start working on it immediately.
 ## Usage
 
 ```
+/pull-ticket 49
+/pull-ticket INF-123
 /pull-ticket ENG-456
 /pull-ticket jdoss/quickvm#42
 /pull-ticket ENG-456 --tracker work
 /pull-ticket ENG-456 --no-worktree
 ```
+
+The tracker is inferred from the ticket ID format when `--tracker` is not given:
+- Bare number (`49`) → GitHub issue; repo inferred from current git remote
+- `TEAM-123` pattern → Linear
+- `owner/repo#N` → GitHub
 
 ## Behavior
 

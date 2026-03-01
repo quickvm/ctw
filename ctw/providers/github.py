@@ -11,6 +11,20 @@ from ctw.settings import CtwSettings
 BASE_URL = "https://api.github.com"
 
 
+def _repo_from_git_remote() -> str | None:
+    """Parse the git remote origin URL to 'owner/repo', or None if not a GitHub remote."""
+    result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip().removesuffix(".git")
+    if url.startswith("git@github.com:"):
+        return url[len("git@github.com:"):]
+    for prefix in ("https://github.com/", "http://github.com/"):
+        if url.startswith(prefix):
+            return url[len(prefix):]
+    return None
+
+
 class GitHubProvider(TicketProvider):
     def __init__(self, settings: CtwSettings) -> None:
         self._token = self._resolve_token(settings)
@@ -70,14 +84,15 @@ class GitHubProvider(TicketProvider):
             repo_part, num_str = issue_id.rsplit("#", 1)
             owner, repo = repo_part.split("/", 1)
             return owner, repo, int(num_str)
-        # bare number
-        if not self._default_repo:
+        # bare number — try configured repo, then git remote
+        repo = self._default_repo or _repo_from_git_remote()
+        if not repo:
             raise RuntimeError(
-                f"Cannot resolve bare issue number '{issue_id}': no default repo set. "
+                f"Cannot resolve bare issue number '{issue_id}': no default repo set and no GitHub remote found. "
                 "Set CTW_GITHUB_REPO or github_repo in your config profile."
             )
-        owner, repo = self._default_repo.split("/", 1)
-        return owner, repo, int(issue_id)
+        owner, repo_name = repo.split("/", 1)
+        return owner, repo_name, int(issue_id)
 
     def _issue_from_node(self, node: dict, owner: str, repo: str) -> Issue:
         labels = [label["name"] for label in node.get("labels", [])]
