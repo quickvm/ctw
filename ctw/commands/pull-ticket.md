@@ -31,6 +31,9 @@ The tracker is inferred from the ticket ID format when `--tracker` is not given:
    - Run `wt list | grep <branch-name>` to check existence
    - If exists: `wt switch <branch-name>`
    - If not: `wt switch --create <branch-name> --yes`
+   - After switching, run `git worktree list` and find the line matching `<branch-name>` to get
+     the absolute worktree path, then run `cd <worktree-path>` so all subsequent commands run
+     inside the worktree without path prefixes
 
 4. Ask exactly this one question (no other text before or after):
    ```
