@@ -1,7 +1,7 @@
 # claude-ticket-wrangler (ctw)
 
 A CLI that bridges Linear and GitHub Issues with worktrunk (`wt`) worktree management,
-exposed as two Claude Code slash commands: `/push-issue` and `/pull-issue`.
+exposed as two Claude Code slash commands: `/push-ticket` and `/pull-ticket`.
 
 **The problem:** mid-session you spot a tangential bug. If you fix it now you muddy your
 context. If you don't write it down you forget it. CTW captures it as a ticket in two
@@ -123,10 +123,33 @@ after `uv tool install` upgrades to refresh symlinks to the new location.
 
 ```bash
 mkdir -p ~/.claude/commands
-ln -sf "$(python -c 'import ctw; print(__import__("pathlib").Path(ctw.__file__).parent)')/commands/push-issue.md" \
-  ~/.claude/commands/push-issue.md
-ln -sf "$(python -c 'import ctw; print(__import__("pathlib").Path(ctw.__file__).parent)')/commands/pull-issue.md" \
-  ~/.claude/commands/pull-issue.md
+ln -sf "$(python -c 'import ctw; print(__import__("pathlib").Path(ctw.__file__).parent)')/commands/push-ticket.md" \
+  ~/.claude/commands/push-ticket.md
+ln -sf "$(python -c 'import ctw; print(__import__("pathlib").Path(ctw.__file__).parent)')/commands/pull-ticket.md" \
+  ~/.claude/commands/pull-ticket.md
+```
+
+### Allow list for automatic approvals
+
+The slash commands run `ctw`, `wt`, and `git` shell commands. Add these to
+`~/.claude/settings.json` so they run without prompting for approval each time:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(ctw context *)",
+      "Bash(ctw create-issue *)",
+      "Bash(ctw slug *)",
+      "Bash(ctw spawn *)",
+      "Bash(wt list*)",
+      "Bash(wt switch *)",
+      "Bash(git log --oneline*)",
+      "Bash(git status*)",
+      "Bash(git diff*)"
+    ]
+  }
+}
 ```
 
 ---
@@ -180,7 +203,7 @@ You're deep in a refactor. You spot an auth middleware bug.
 
 ```
 # In your current Claude Code session:
-/push-issue the logout handler throws a 500 when session is None — stack trace in auth/middleware.py:142 --tracker work
+/push-ticket the logout handler throws a 500 when session is None — stack trace in auth/middleware.py:142 --tracker work
 # → "Create a background worktree? [y/N]" → y
 # ✓ ENG-456 "Fix auth middleware null pointer" [work] → branch eng-456-fix-auth-middleware (worktree created)
 # Resume what you were doing.
@@ -189,18 +212,18 @@ You're deep in a refactor. You spot an auth middleware bug.
 Later, in a fresh terminal:
 
 ```
-/pull-issue ENG-456 --tracker work
+/pull-ticket ENG-456 --tracker work
 # Claude fetches the ticket, switches to the worktree, reads TASK.md, briefs you, and starts.
 ```
 
 ### GitHub example
 
 ```
-/push-issue logout button sends 500 when cookie is expired --tracker quickvm
-# ✓ jdoss/quickvm#42 "Fix logout 500 on expired cookie" [quickvm] → branch jdoss-quickvm-42-fix-logout-500
+/push-ticket logout button sends 500 when cookie is expired --tracker quickvm
+# ✓ jdoss/quickvm#42 "Fix logout 500 on expired cookie" [quickvm] → branch 42-fix-logout-500
 
-# Later:
-/pull-issue jdoss/quickvm#42 --tracker quickvm
+# Later (tracker inferred from issue ID format):
+/pull-ticket 42
 ```
 
 ### With wt hook
@@ -228,6 +251,7 @@ The worktree has `TASK.md` waiting before you even open your editor.
 | `ctw list-teams [--tracker]` | List teams or repos |
 | `ctw context <id> [--tracker] [-o FILE]` | Render TASK.md context block |
 | `ctw slug <id> [--tracker]` | Print git-safe branch name (no newline) |
+| `ctw spawn <id> [--tracker] [--background] [--prompt]` | Spawn a Claude agent in the ticket's worktree |
 | `ctw set-default <tracker>` | Set default tracker in config.toml |
 | `ctw config-show [--tracker]` | Show resolved config with masked credentials |
 | `ctw install-commands` | Symlink slash commands to ~/.claude/commands/ |
@@ -235,6 +259,16 @@ The worktree has `TASK.md` waiting before you even open your editor.
 
 All commands that interact with a provider accept `--tracker / -k <profile>` to override the
 active tracker for that invocation.
+
+### Tracker inference
+
+When `--tracker` is not given, CTW infers the provider from the issue ID format:
+
+| ID format | Infers |
+|-----------|--------|
+| `49` | GitHub — repo from current git remote |
+| `ENG-123` | Linear — first Linear profile in config |
+| `owner/repo#42` | GitHub — first GitHub profile in config |
 
 ### `ctw slug` — shell substitution
 
@@ -247,7 +281,8 @@ wt switch --create $(ctw slug jdoss/quickvm#42 --tracker quickvm)
 
 Branch name format:
 - Linear: `eng-123-fix-null-check-in-auth-middleware` (title truncated at 40 chars)
-- GitHub: `jdoss-quickvm-42-fix-null-check` (`/` and `#` replaced with `-`)
+- GitHub (current repo): `42-fix-null-check` (bare number prefix)
+- GitHub (other repo): `jdoss-quickvm-42-fix-null-check` (`/` and `#` replaced with `-`)
 
 ---
 
