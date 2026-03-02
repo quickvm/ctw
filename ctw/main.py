@@ -152,6 +152,12 @@ def render_context(issue: Issue) -> str:
         description,
     ]
 
+    if issue.comments:
+        lines += ["", "## Comments", ""]
+        for comment in issue.comments:
+            author, _, body = comment.partition(": ")
+            lines += [f"**{author}:** {body}", ""]
+
     return "\n".join(lines)
 
 

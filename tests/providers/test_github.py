@@ -111,12 +111,17 @@ class TestRepoFromGitRemote:
             assert _repo_from_git_remote() is None
 
 
+def _mock_comments(httpx_mock: HTTPXMock, comments: list | None = None) -> None:
+    # No url= — query params (?per_page=50) would cause exact-match failures.
+    # Responses are consumed in registration order, so this always matches the
+    # second request (comments) after the issue response has been consumed.
+    httpx_mock.add_response(json=comments or [])
+
+
 class TestGetIssue:
     def test_returns_issue_fully_qualified(self, httpx_mock: HTTPXMock) -> None:
-        httpx_mock.add_response(
-            url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42",
-            json=_ISSUE_NODE,
-        )
+        httpx_mock.add_response(url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42", json=_ISSUE_NODE)
+        _mock_comments(httpx_mock)
         provider = GitHubProvider(_settings())
         issue = provider.get_issue("jdoss/quickvm#42")
 
@@ -129,19 +134,15 @@ class TestGetIssue:
         assert issue.labels == ["bug"]
 
     def test_returns_issue_bare_number(self, httpx_mock: HTTPXMock) -> None:
-        httpx_mock.add_response(
-            url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42",
-            json=_ISSUE_NODE,
-        )
+        httpx_mock.add_response(url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42", json=_ISSUE_NODE)
+        _mock_comments(httpx_mock)
         provider = GitHubProvider(_settings(github_repo="jdoss/quickvm"))
         issue = provider.get_issue("42")
         assert issue.identifier == "jdoss/quickvm#42"
 
     def test_returns_issue_bare_number_via_git_remote(self, httpx_mock: HTTPXMock) -> None:
-        httpx_mock.add_response(
-            url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42",
-            json=_ISSUE_NODE,
-        )
+        httpx_mock.add_response(url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42", json=_ISSUE_NODE)
+        _mock_comments(httpx_mock)
         provider = GitHubProvider(_settings(github_repo=None))
         git_remote = MagicMock(returncode=0, stdout="https://github.com/jdoss/quickvm.git\n")
         with patch("subprocess.run", return_value=git_remote):
@@ -159,14 +160,25 @@ class TestGetIssue:
             provider.get_issue("jdoss/quickvm#42")
 
     def test_closed_issue_state(self, httpx_mock: HTTPXMock) -> None:
-        closed = {**_ISSUE_NODE, "state": "closed"}
-        httpx_mock.add_response(
-            url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42",
-            json=closed,
-        )
+        httpx_mock.add_response(url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42", json={**_ISSUE_NODE, "state": "closed"})
+        _mock_comments(httpx_mock)
         provider = GitHubProvider(_settings())
         issue = provider.get_issue("jdoss/quickvm#42")
         assert issue.state == "Closed"
+
+    def test_comments_included(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42", json=_ISSUE_NODE)
+        _mock_comments(httpx_mock, [{"user": {"login": "alice"}, "body": "Looks good to me."}])
+        provider = GitHubProvider(_settings())
+        issue = provider.get_issue("jdoss/quickvm#42")
+        assert issue.comments == ["alice: Looks good to me."]
+
+    def test_no_comments_returns_empty(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=f"{BASE_URL}/repos/jdoss/quickvm/issues/42", json=_ISSUE_NODE)
+        _mock_comments(httpx_mock, [])
+        provider = GitHubProvider(_settings())
+        issue = provider.get_issue("jdoss/quickvm#42")
+        assert issue.comments == []
 
 
 class TestListMyIssues:

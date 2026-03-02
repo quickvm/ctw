@@ -94,7 +94,9 @@ class GitHubProvider(TicketProvider):
         owner, repo_name = repo.split("/", 1)
         return owner, repo_name, int(issue_id)
 
-    def _issue_from_node(self, node: dict, owner: str, repo: str) -> Issue:
+    def _issue_from_node(
+        self, node: dict, owner: str, repo: str, comments: list[str] | None = None
+    ) -> Issue:
         labels = [label["name"] for label in node.get("labels", [])]
         assignees = node.get("assignees", [])
         assignee = assignees[0]["login"] if assignees else None
@@ -111,13 +113,19 @@ class GitHubProvider(TicketProvider):
             assignee=assignee,
             team=f"{owner}/{repo}",
             labels=labels,
+            comments=comments or [],
             provider="github",
         )
 
     def get_issue(self, issue_id: str) -> Issue:
         owner, repo, number = self._parse_issue_id(issue_id)
         node = self._get(f"/repos/{owner}/{repo}/issues/{number}")
-        return self._issue_from_node(node, owner, repo)  # type: ignore[arg-type]
+        raw_comments = self._get(
+            f"/repos/{owner}/{repo}/issues/{number}/comments",
+            params={"per_page": "50"},
+        )
+        comments = [f"{c['user']['login']}: {c['body']}" for c in raw_comments]  # type: ignore[union-attr]
+        return self._issue_from_node(node, owner, repo, comments=comments)  # type: ignore[arg-type]
 
     def list_my_issues(self) -> list[Issue]:
         # NOTE: fetches page 1 only (up to 50 results). Full pagination not implemented.

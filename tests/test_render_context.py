@@ -78,3 +78,35 @@ def test_provider_linear_label(linear_issue: Issue) -> None:
 def test_provider_github_label(github_issue: Issue) -> None:
     rendered = render_context(github_issue)
     assert "**Provider:** GitHub" in rendered
+
+
+def test_comments_rendered() -> None:
+    issue = Issue(
+        id="1",
+        identifier="ENG-1",
+        title="Test",
+        description="desc",
+        url="https://example.com",
+        state="Open",
+        provider="linear",
+        comments=["Alice: Looks good.", "Bob: Agreed."],
+    )
+    rendered = render_context(issue)
+    assert "## Comments" in rendered
+    assert "**Alice:** Looks good." in rendered
+    assert "**Bob:** Agreed." in rendered
+
+
+def test_no_comments_omits_section() -> None:
+    issue = Issue(
+        id="1",
+        identifier="ENG-1",
+        title="Test",
+        description="desc",
+        url="https://example.com",
+        state="Open",
+        provider="linear",
+        comments=[],
+    )
+    rendered = render_context(issue)
+    assert "## Comments" not in rendered

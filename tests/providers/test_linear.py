@@ -26,6 +26,7 @@ _ISSUE_NODE = {
     "assignee": {"name": "Jane Doe", "email": "jane@example.com"},
     "team": {"name": "Engineering", "key": "ENG"},
     "labels": {"nodes": [{"name": "bug"}]},
+    "comments": {"nodes": []},
     "createdAt": "2024-01-01T00:00:00Z",
     "updatedAt": "2024-01-02T00:00:00Z",
 }
@@ -56,6 +57,22 @@ class TestGetIssue:
         provider = LinearProvider(_settings())
         with pytest.raises(RuntimeError, match="not found"):
             provider.get_issue("ENG-999")
+
+    def test_comments_included(self, httpx_mock: HTTPXMock) -> None:
+        node = {
+            **_ISSUE_NODE,
+            "comments": {"nodes": [{"body": "LGTM", "user": {"name": "Alice"}}]},
+        }
+        httpx_mock.add_response(url=ENDPOINT, json={"data": {"issue": node}})
+        provider = LinearProvider(_settings())
+        issue = provider.get_issue("ENG-123")
+        assert issue.comments == ["Alice: LGTM"]
+
+    def test_no_comments_returns_empty(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=ENDPOINT, json={"data": {"issue": _ISSUE_NODE}})
+        provider = LinearProvider(_settings())
+        issue = provider.get_issue("ENG-123")
+        assert issue.comments == []
 
 
 class TestListMyIssues:

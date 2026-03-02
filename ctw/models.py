@@ -16,6 +16,7 @@ class Issue(BaseModel):
     assignee: str | None = None
     team: str | None = None  # Linear team name or GitHub repo name
     labels: list[str] = []
+    comments: list[str] = []  # "Author: body" strings
     provider: str  # "linear" | "github"
 
 

@@ -23,6 +23,7 @@ query GetIssue($id: String!) {
     assignee { name email }
     team { name key }
     labels { nodes { name } }
+    comments(first: 50) { nodes { body user { name } } }
     createdAt
     updatedAt
   }
@@ -110,6 +111,8 @@ class LinearProvider(TicketProvider):
         return data["data"]
 
     def _issue_from_node(self, node: dict) -> Issue:
+        raw_comments = node.get("comments", {}).get("nodes", [])
+        comments = [f"{c['user']['name']}: {c['body']}" for c in raw_comments if c.get("user")]
         return Issue(
             id=node["id"],
             identifier=node["identifier"],
@@ -121,6 +124,7 @@ class LinearProvider(TicketProvider):
             assignee=node["assignee"]["name"] if node.get("assignee") else None,
             team=node["team"]["name"] if node.get("team") else None,
             labels=[label["name"] for label in node.get("labels", {}).get("nodes", [])],
+            comments=comments,
             provider="linear",
         )
 
