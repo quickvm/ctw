@@ -132,25 +132,30 @@ ln -sf "$(python -c 'import ctw; print(__import__("pathlib").Path(ctw.__file__).
 ### Allow list for automatic approvals
 
 The slash commands run `ctw`, `wt`, and `git` shell commands. Add these to
-`~/.claude/settings.json` so they run without prompting for approval each time:
+`~/.claude/settings.json` (global) so they run without prompting for approval in any project:
 
 ```json
 {
   "permissions": {
     "allow": [
-      "Bash(ctw context *)",
-      "Bash(ctw create-issue *)",
-      "Bash(ctw slug *)",
-      "Bash(ctw spawn *)",
+      "Bash(ctw context:*)",
+      "Bash(ctw create-issue:*)",
+      "Bash(ctw slug:*)",
+      "Bash(ctw spawn:*)",
       "Bash(wt list*)",
-      "Bash(wt switch *)",
+      "Bash(wt switch:*)",
       "Bash(git log --oneline*)",
       "Bash(git status*)",
-      "Bash(git diff*)"
+      "Bash(git diff*)",
+      "Bash(git worktree list*)"
     ]
   }
 }
 ```
+
+`wt list*` and `git *` use a prefix glob (no colon) because those commands are often
+piped or given additional flags. `ctw` and `wt switch` use `command:*` to scope
+the match to the subcommand only.
 
 ---
 

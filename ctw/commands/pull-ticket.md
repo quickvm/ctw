@@ -61,11 +61,20 @@ The tracker is inferred from the ticket ID format when `--tracker` is not given:
    **Where:** <likely relevant files/directories inferred from ticket description>
    **State:** <"No prior work" | "X commits ahead of main: <one-line summary>">
 
+   **Plan:**
+   <If TASK.md contains a structured plan (numbered steps, checkboxes, sections), reproduce it
+   verbatim here so all work is visible upfront. If there is no structured plan, write a
+   numbered list of the steps you will take to complete the ticket.>
+
    Starting with: <one sentence describing your first action>
    ```
 
 9. **Begin work immediately** after the briefing. No confirmation prompt. Never say "shall I
    proceed" or "let me know if you want me to start."
+
+   Work through **every step of the plan** before stopping. Do not stop after the first step.
+   Do not ask for confirmation between steps. If you finish one step, begin the next immediately.
+   Only stop when all planned work is done and committed.
 
 ## Hard constraints
 

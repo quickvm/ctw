@@ -111,7 +111,7 @@ class TestCreateIssue:
         assert result.exit_code == 0
         assert "ENG-99" in result.output
 
-    def test_no_team_exits(self) -> None:
+    def test_no_team_exits_for_linear(self) -> None:
         with patch("ctw.main.get_provider", return_value=_mock_provider()):
             with patch("ctw.main.get_settings") as mock_settings:
                 s = MagicMock()
@@ -121,6 +121,40 @@ class TestCreateIssue:
                 mock_settings.return_value = s
                 result = runner.invoke(app, ["create-issue", "Test"])
         assert result.exit_code != 0
+        assert "linear_team_id" in result.output
+
+    def test_github_falls_back_to_git_remote(self) -> None:
+        gh_provider = _mock_provider()
+        gh_provider.create_issue.return_value = CreatedIssue(
+            identifier="jdoss/myrepo#5",
+            title="Test GH",
+            url="https://github.com/jdoss/myrepo/issues/5",
+            provider="github",
+        )
+        with patch("ctw.main.get_provider", return_value=gh_provider):
+            with patch("ctw.main.get_settings") as mock_settings:
+                with patch("ctw.main._repo_from_git_remote", return_value="jdoss/myrepo"):
+                    s = MagicMock()
+                    s.provider = "github"
+                    s.linear_team_id = None
+                    s.github_repo = None
+                    mock_settings.return_value = s
+                    result = runner.invoke(app, ["create-issue", "Test GH", "Desc"])
+        assert result.exit_code == 0
+        assert "jdoss/myrepo#5" in result.output
+
+    def test_github_no_remote_exits(self) -> None:
+        with patch("ctw.main.get_provider", return_value=_mock_provider()):
+            with patch("ctw.main.get_settings") as mock_settings:
+                with patch("ctw.main._repo_from_git_remote", return_value=None):
+                    s = MagicMock()
+                    s.provider = "github"
+                    s.linear_team_id = None
+                    s.github_repo = None
+                    mock_settings.return_value = s
+                    result = runner.invoke(app, ["create-issue", "Test"])
+        assert result.exit_code != 0
+        assert "GitHub remote" in result.output
 
 
 class TestListTeams:
@@ -255,7 +289,7 @@ class TestConfigureWt:
         hook = wt_config.read_text()
         assert 'ctw context "$TICKET"' in hook and "--tracker" not in hook.split("ctw context")[1].split("\n")[0]
 
-    def test_auto_approves_hook_when_wt_available(self, tmp_path: Path) -> None:
+    def test_prints_next_steps_when_wt_available(self, tmp_path: Path) -> None:
         wt_config = tmp_path / ".config" / "wt.toml"
 
         def fake_run(args, **kwargs):
@@ -268,23 +302,9 @@ class TestConfigureWt:
 
         assert result.exit_code == 0, result.output
         called = [c.args[0] for c in mock_run.call_args_list]
-        assert ["wt", "hook", "approvals", "add", "ctw-context"] in called
-        assert "auto-approved" in result.output
-
-    def test_warns_when_approval_fails(self, tmp_path: Path) -> None:
-        wt_config = tmp_path / ".config" / "wt.toml"
-
-        def fake_run(args, **kwargs):
-            m = MagicMock()
-            m.stdout = "  main\n"
-            m.returncode = 1 if args == ["wt", "hook", "approvals", "add", "ctw-context"] else 0
-            return m
-
-        with patch("subprocess.run", side_effect=fake_run):
-            result = runner.invoke(app, ["configure-wt", "--config", str(wt_config)])
-
-        assert result.exit_code == 0, result.output
-        assert "Could not auto-approve" in result.output
+        assert ["wt", "hook", "approvals", "add", "ctw-context"] not in called
+        assert "wt hook approvals add" in result.output
+        assert "Next steps" in result.output
 
     def test_warns_when_main_branch_missing(self, tmp_path: Path) -> None:
         wt_config = tmp_path / ".config" / "wt.toml"

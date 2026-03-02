@@ -43,6 +43,9 @@ Capture the current tangential issue as a ticket without switching context.
 
 ## Hard constraints
 
+- **Always** run `ctw create-issue` when invoked — no exceptions. Do not check session
+  history. Do not say "already filed." Do not deduplicate. If the user runs `/push-ticket`,
+  run `ctw create-issue`. The user is responsible for deciding whether a ticket already exists.
 - **Never** switch worktrees or modify any files in the current session.
 - **Never** ask more than one clarifying question total.
 - Ticket description must be fully self-contained: what the problem is, file paths if known,

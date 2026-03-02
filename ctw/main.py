@@ -370,11 +370,19 @@ def create_issue(
 
     # Resolve team ID
     team_id = team or settings.linear_team_id or settings.github_repo
+    if not team_id and settings.provider == "github":
+        team_id = _repo_from_git_remote()
     if not team_id:
-        rprint(
-            "[red]No team specified. Use --team or set linear_team_id / github_repo "
-            "in your config profile. Run 'ctw list-teams' to see available teams.[/red]"
-        )
+        if settings.provider == "github":
+            rprint(
+                "[red]No repo specified and no GitHub remote found. Use --team owner/repo, "
+                "set github_repo in your config profile, or run from a directory with a GitHub remote.[/red]"
+            )
+        else:
+            rprint(
+                "[red]No team specified. Use --team or set linear_team_id in your config profile. "
+                "Run 'ctw list-teams' to see available teams.[/red]"
+            )
         raise typer.Exit(1)
 
     effective_priority: int | None = priority
@@ -613,24 +621,18 @@ def configure_wt(
 
     _apply_worktree_path(_wt_user_config_path())
 
-    if wt_found:
-        approval = subprocess.run(["wt", "hook", "approvals", "add", "ctw-context"], capture_output=True)
-        if approval.returncode == 0:
-            rprint("[green]✓[/green] Hook auto-approved (wt hook approvals add ctw-context)")
-        else:
-            rprint("[yellow]Warning:[/yellow] Could not auto-approve hook. Run manually:")
-            rprint("  wt hook approvals add ctw-context")
-
     main_check = subprocess.run(["git", "branch", "--list", "main"], capture_output=True, text=True)
-    if not main_check.stdout.strip():
-        branch_result = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], capture_output=True, text=True)
-        current = branch_result.stdout.strip()
-        if current:
-            rprint("[yellow]Tip:[/yellow] Branch 'main' not found locally. If wt complains, run:")
-            rprint(f"  wt config state default-branch set {current}")
+    branch_result = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], capture_output=True, text=True)
+    current = branch_result.stdout.strip()
+    has_main = bool(main_check.stdout.strip())
 
     rprint("")
-    rprint(f"[dim]Commit it:[/dim] git add {target} && git commit -m 'Add CTW worktree hook'")
+    rprint("[bold]Next steps:[/bold]")
+    rprint(f"  1. git add {target} && git commit -m 'Add CTW worktree hook'")
+    if wt_found:
+        rprint("  2. wt hook approvals add          # approve the ctw-context hook interactively")
+        if not has_main and current:
+            rprint(f"  3. wt config state default-branch set {current}  # tell wt your default branch")
 
 
 @app.command("init")
